@@ -12,6 +12,8 @@ x-shared: &shared
     - QUEUE_BULL_REDIS_HOST=redis
     - QUEUE_HEALTH_CHECK_ACTIVE=true
     - N8N_ENCRYPTION_KEY=${ENCRYPTION_KEY}
+    - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+    - TZ=${TZ}
   links:
     - postgres
     - redis
