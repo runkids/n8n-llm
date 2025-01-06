@@ -1,7 +1,37 @@
-version: '3.8'
+x-shared: &shared
+  restart: always
+  image: docker.n8n.io/n8nio/n8n
+  environment:
+    - DB_TYPE=postgresdb
+    - DB_POSTGRESDB_HOST=postgres
+    - DB_POSTGRESDB_PORT=5432
+    - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
+    - DB_POSTGRESDB_USER=${POSTGRES_NON_ROOT_USER}
+    - DB_POSTGRESDB_PASSWORD=${POSTGRES_NON_ROOT_PASSWORD}
+    - EXECUTIONS_MODE=queue
+    - QUEUE_BULL_REDIS_HOST=redis
+    - QUEUE_HEALTH_CHECK_ACTIVE=true
+    - N8N_ENCRYPTION_KEY=${ENCRYPTION_KEY}
+    - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+    - TZ=${TZ}
+  links:
+    - postgres
+    - redis
+  depends_on:
+    redis:
+      condition: service_healthy
+    postgres:
+      condition: service_healthy
+  volumes:
+    - n8n_storage:/home/node/.n8n
+    - ${SHARED_FOLDER}:/shared-folder
+  networks:
+    - n8n-network
+
 services:
   postgres:
     image: postgres:16
+    container_name: n8n-postgres
     restart: always
     environment:
       - POSTGRES_USER
@@ -10,7 +40,7 @@ services:
       - POSTGRES_NON_ROOT_USER
       - POSTGRES_NON_ROOT_PASSWORD
     ports:
-      - 5432:5432
+      - ${POSTGRES_EXTERNAL_PORT}:5432
     volumes:
       - db_storage:/var/lib/postgresql/data
       - ./init-data.sh:/docker-entrypoint-initdb.d/init-data.sh
@@ -19,29 +49,99 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - n8n-network
+    extra_hosts:
+      - host.docker.internal:host-gateway
+
+  redis:
+    image: redis:6-alpine
+    container_name: n8n-redis
+    restart: always
+    volumes:
+      - redis_storage:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - n8n-network
 
   n8n:
-    image: docker.n8n.io/n8nio/n8n
-    restart: always
-    environment:
-      - DB_TYPE=postgresdb
-      - DB_POSTGRESDB_HOST=postgres
-      - DB_POSTGRESDB_PORT=5432
-      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
-      - DB_POSTGRESDB_USER=${POSTGRES_NON_ROOT_USER}
-      - DB_POSTGRESDB_PASSWORD=${POSTGRES_NON_ROOT_PASSWORD}
+    <<: *shared
+    container_name: n8n
     ports:
       - 5678:5678
-    links:
-      - postgres
-    volumes:
-      - n8n_storage:/home/node/.n8n
-      - ${SHARED_FOLDER}:/shared-folder
+
+  n8n-worker:
+    <<: *shared
+    container_name: n8n-worker
+    command: worker
     depends_on:
-      postgres:
-        condition: service_healthy
+      - n8n
+
+  anythingllm:
+    image: mintplexlabs/anythingllm
+    container_name: anything-llm
+    ports:
+    - "${SERVER_PORT}:${SERVER_PORT}"
+    cap_add:
+      - SYS_ADMIN
+    environment:
+    # Adjust for your environment
+      - STORAGE_DIR=/app/server/storage
+      - JWT_SECRET=${JWT_SECRET}
+      - SERVER_PORT=${SERVER_PORT}
+      - LLM_PROVIDER=${LLM_PROVIDER}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_LLM_MODEL_PREF=${GEMINI_LLM_MODEL_PREF}
+      - OLLAMA_BASE_PATH=http://host.docker.internal:11434
+      - OLLAMA_MODEL_PREF=gemma2
+      - OLLAMA_MODEL_TOKEN_LIMIT=4096
+      - EMBEDDING_ENGINE=ollama
+      - EMBEDDING_BASE_PATH=http://host.docker.internal:11434
+      - EMBEDDING_MODEL_PREF=nomic-embed-text:latest
+      - EMBEDDING_MODEL_MAX_CHUNK_LENGTH=8192
+      - VECTOR_DB=lancedb
+      - WHISPER_PROVIDER=local
+      - TTS_PROVIDER=native
+      - PASSWORDMINCHAR=8
+      # Add any other keys here for services or settings
+      # you can find .env.anythingllm.example file
+    volumes:
+      - ./llm/anything-llm:/app/server/storage
+      - ${SHARED_FOLDER}:/shared-folder
+    networks:
+      - n8n-network
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${SERVER_PORT}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: always
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    volumes:
+      - ./llm/open-webui:/app/backend/data
+    ports:
+      - 8080:8080
+    environment:
+      - '/ollama/api=http://host.docker.internal:11434/api'
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    restart: unless-stopped
+    networks:
+      - n8n-network
+
+networks:
+  n8n-network:
 
 volumes:
   db_storage:
   n8n_storage:
-  shared-data:
+  redis_storage:
