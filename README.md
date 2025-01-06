@@ -1,6 +1,10 @@
 # n8n-llm
 - Integrates LLM utils into n8n.
 
+## Setup
+  - Create `.env` (see .env.example)
+  - Run `docker-compose up -d`
+  
 ### Ollama
   - Install on local: `brew install ollama`
   - Install Models: https://ollama.com/search
