@@ -1,4 +1,5 @@
-# n8n
+# n8n-llm
+- Integrates LLM utils into n8n.
 
 ### Ollama
   - Install on local: `brew install ollama`
