@@ -30,8 +30,8 @@ x-shared: &shared
 
 services:
   postgres:
-    image: postgres:16
-    container_name: n8n-postgres
+    image: pgvector/pgvector:pg16
+    container_name: n8n-postgres-pgvector
     restart: always
     environment:
       - POSTGRES_USER
